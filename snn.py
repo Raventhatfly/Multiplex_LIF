@@ -37,7 +37,7 @@ act_fun = ActFun.apply
 #     spike = act_fun(mem) # act_fun : approximation firing function
 #     return mem, spike
 
-def mem_update(ops, x, mem, spike, time_step):
+def mem_update(y, mem, spike, time_step):
     # odd and even indices multiplex
     # y = ops(x)
 
@@ -50,12 +50,12 @@ def mem_update(ops, x, mem, spike, time_step):
 
     # y_even = torch.masked_select(y,mask_even).view(batch_size,-1)
     # y_odd = torch.masked_select(y,mask_odd).view(batch_size,-1)
-    is_odd = time_step % 2
-    y = ops(x)
+    # is_odd = time_step % 2
+    # y = ops(x)
     # print(mem.shape)
     # print(spike.shape)
     # print(y.shape)
-    mem = mem * decay * (1. - spike[:,is_odd :: 2].clone()) + y[:, is_odd :: 2].clone()
+    mem = mem * decay * (1. - spike) + y
     spike = act_fun(mem) # act_fun : approximation firing function
     return mem, spike
 
@@ -91,6 +91,7 @@ class SNN(nn.Module):
         self.fc1 = nn.Linear(self.input_layer,self.hidden_layer)
         self.fc2 = nn.Linear(self.hidden_layer,self.output_layer)
 
+
     def forward(self, input, time_window = 20):
 
         h_spike = torch.zeros(batch_size,self.hidden_layer,device=device)
@@ -99,24 +100,41 @@ class SNN(nn.Module):
         h_mem = torch.zeros(batch_size,self.muliplex_hidden_layer,device=device)
         o_mem = torch.zeros(batch_size,self.muliplex_output_layer,device=device)
 
+        self.mask_hidden_odd = torch.zeros((60,30), device=device, requires_grad=False)
+        self.mask_hidden_even = torch.zeros((60,30), device=device, requires_grad=False)
+        self.mask_hidden_odd[1::2,:] = torch.eye(30).clone()
+        self.mask_hidden_even[::2,:] = torch.eye(30).clone()
+
+        self.mask_out_odd = torch.zeros((10,5), device=device, requires_grad=False)
+        self.mask_out_even = torch.zeros((10,5), device=device, requires_grad=False)
+        self.mask_out_odd[1::2,:] = torch.eye(5).clone()
+        self.mask_out_even[::2,:] = torch.eye(5).clone()
+
+
         for step in range(time_window): # simulation time steps
             x = input > torch.rand(input.size(), device=device) # prob. firing
+            
             if step % 2 == 0:   # even indices
-                h_mem, h_spike_even = mem_update(self.fc1, x.float(), h_mem, h_spike, step)
+                yh = self.fc1(x.float())
+                h_mem, h_spike_even = mem_update(yh @ self.mask_hidden_even, h_mem, h_spike @ self.mask_hidden_even, step)
                 # h_sum += h_spike_even
-                h_spike[:,::2] = h_spike_even.clone()
+                h_spike = h_spike_even @ self.mask_hidden_even.T
 
-                o_mem, o_spike_even = mem_update(self.fc2, h_spike, o_mem, o_spike, step)
-                o_sum[:,::2] += o_spike_even.clone()
-                o_spike[:,::2] = o_spike_even.clone()
+                yo = self.fc2(h_spike)
+                o_mem, o_spike_even = mem_update(yo @ self.mask_out_even, o_mem, o_spike @ self.mask_out_even, step)
+                o_sum = (o_sum @ self.mask_out_even + o_spike_even) @ self.mask_out_even.T
+                o_spike = o_spike_even @ self.mask_out_even.T
+
             else:               # odd indices
-                h_mem, h_spike_odd = mem_update(self.fc1, x.float(), h_mem, h_spike, step)
+                yh = self.fc1(x.float())
+                h_mem, h_spike_odd = mem_update(yh @ self.mask_hidden_odd, h_mem, h_spike @ self.mask_hidden_odd, step)
                 # h_sum += h_spike_odd
-                h_spike[:,1::2] = h_spike_odd.clone()
+                h_spike = h_spike_odd @ self.mask_hidden_odd.T
 
-                o_mem, o_spike_odd = mem_update(self.fc2, h_spike, o_mem, o_spike, step)
-                o_sum[:,1::2] += o_spike_odd.clone()
-                o_spike[:,1::2] = o_spike_odd.clone()
+                yo = self.fc2(h_spike)
+                o_mem, o_spike_odd = mem_update(yo @ self.mask_out_odd, o_mem, o_spike @ self.mask_out_odd, step)
+                o_sum = (o_sum @ self.mask_out_odd + o_spike_odd) @ self.mask_out_odd.T
+                o_spike = o_spike_odd @ self.mask_out_odd.T
 
         outputs = o_sum / time_window
         return outputs
