@@ -122,7 +122,7 @@ class SNN(nn.Module):
 
                 yo = self.fc2(h_spike)
                 o_mem, o_spike_even = mem_update(yo @ self.mask_out_even, o_mem, o_spike @ self.mask_out_even, step)
-                o_sum = (o_sum @ self.mask_out_even + o_spike_even) @ self.mask_out_even.T
+                o_sum = o_sum  + o_spike_even @ self.mask_out_even.T
                 o_spike = o_spike_even @ self.mask_out_even.T
 
             else:               # odd indices
@@ -133,7 +133,7 @@ class SNN(nn.Module):
 
                 yo = self.fc2(h_spike)
                 o_mem, o_spike_odd = mem_update(yo @ self.mask_out_odd, o_mem, o_spike @ self.mask_out_odd, step)
-                o_sum = (o_sum @ self.mask_out_odd + o_spike_odd) @ self.mask_out_odd.T
+                o_sum = o_sum + o_spike_odd @ self.mask_out_odd.T
                 o_spike = o_spike_odd @ self.mask_out_odd.T
 
         outputs = o_sum / time_window
